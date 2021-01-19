@@ -226,7 +226,7 @@ class MeshRegNet(nn.Module):
             )
             recov_hand_verts3d = mano_results["verts3d"] + center3d
             proj_joints2d = camproject.batch_proj2d(recov_joints3d, camintr)
-            proj_verts2d = camproject.batch_proj2d(mano_results["verts3d"] + center3d, camintr)
+            proj_verts2d = camproject.batch_proj2d(recov_hand_verts3d, camintr)
 
             mano_results["joints2d"] = proj_joints2d
             mano_results["recov_joints3d"] = recov_joints3d
@@ -337,7 +337,7 @@ class MeshRegNet(nn.Module):
                 TransQueries.HANDVERTS3D,
             ],
         )
-        if has_mano_super and self.mano_lambdas:
+        if True or (has_mano_super and self.mano_lambdas):
             if preparams is not None:
                 hand_scale = preparams["hand_prescale"]
                 hand_pose = preparams["pose"]

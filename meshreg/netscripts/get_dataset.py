@@ -6,6 +6,8 @@ from meshreg.datasets import (
     ho3dv2,
     syntho3dv2,
     syntho3d,
+    syn_colibri_v1,
+    real_colibri_v1,
 )
 
 
@@ -28,6 +30,7 @@ def get_dataset(
     scale_jittering=0,
     use_cache=False,
 ):
+    dataset = None
     if dataset_name == "ho3dv2":
         pose_dataset = ho3dv2.HO3DV2(
             split=split,
@@ -51,8 +54,19 @@ def get_dataset(
             split=split, use_cache=use_cache, mini_factor=mini_factor, fraction=fraction, mode=mode
         )
         input_res = (480, 270)
+    elif dataset_name == "syn_colibri_v1":
+        input_res = (256, 256)
+        pose_dataset = syn_colibri_v1.SynColibriV1(
+            split=split, use_cache=use_cache
+        )
+    elif dataset_name == "real_colibri_v1":
+        input_res = (256, 256)
+        pose_dataset = real_colibri_v1.RealColibriV1(
+            split=split, use_cache=use_cache
+        )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
+
     sides = "right"
     dataset = handobjset.HandObjSet(
         pose_dataset=pose_dataset,
@@ -69,4 +83,5 @@ def get_dataset(
         spacing=spacing,
         has_dist2strong=has_dist2strong,
     )
+
     return dataset, input_res

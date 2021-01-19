@@ -8,7 +8,7 @@ import torch
 from tqdm import tqdm
 
 from libyana.exputils.argutils import save_args
-from libyana.exputils.monitoring import Monitor
+from meshreg.netscripts.monitor import MetricMonitor
 from libyana.modelutils import modelio
 from libyana.modelutils import freeze
 from libyana.randomutils import setseeds
@@ -18,7 +18,6 @@ from meshreg.datasets import collate
 from meshreg.models.meshregnet import MeshRegNet
 from meshreg.netscripts import epochpass
 from meshreg.netscripts import reloadmodel, get_dataset
-
 
 plt.switch_backend("agg")
 
@@ -30,26 +29,25 @@ def main(args):
     now = datetime.now()
     split_str = "_".join(args.train_splits)
     exp_id = (
-        f"checkpoints/{dat_str}_{split_str}_mini{args.mini_factor}/{now.year}_{now.month:02d}_{now.day:02d}/"
-        f"{args.com}_frac{args.fraction:.1e}"
-        f"lr{args.lr}_mom{args.momentum}_bs{args.batch_size}_"
-        f"_lmbeta{args.mano_lambda_shape:.1e}"
-        f"_lmpr{args.mano_lambda_pose_reg:.1e}"
-        f"_lmrj3d{args.mano_lambda_recov_joints3d:.1e}"
-        f"_lovr3d{args.obj_lambda_recov_verts3d:.1e}"
-        f"seed{args.manual_seed}"
+        f"checkpoints/{dat_str}_{split_str}_mini{args.mini_factor}/{now.year}_{now.month:02d}_{now.day:02d}_{now.hour:02d}_{now.minute:02d}/"
+        #f"{args.com}_frac{args.fraction:.1e}"
+        #f"lr{args.lr}_mom{args.momentum}_bs{args.batch_size}_"
+        #f"_lmbeta{args.mano_lambda_shape:.1e}"
+        #f"_lmpr{args.mano_lambda_pose_reg:.1e}"
+        #f"_lmrj3d{args.mano_lambda_recov_joints3d:.1e}"
+        #f"_lovr3d{args.obj_lambda_recov_verts3d:.1e}"
+        #f"seed{args.manual_seed}"
     )
-    if args.no_augm:
-        exp_id = f"{exp_id}_no_augm"
-    if args.block_rot:
-        exp_id = f"{exp_id}_block_rot"
-    if args.freeze_batchnorm:
-        exp_id = f"{exp_id}_fbn"
+    # if args.no_augm:
+    #     exp_id = f"{exp_id}_no_augm"
+    # if args.block_rot:
+    #     exp_id = f"{exp_id}_block_rot"
+    # if args.freeze_batchnorm:
+    #     exp_id = f"{exp_id}_fbn"
 
     # Initialize local checkpoint folder
     print(f"Saving experiment logs, models, and training curves and images at {exp_id}")
     save_args(args, exp_id, "opt")
-    monitor = Monitor(exp_id, hosting_folder=exp_id)
     img_folder = os.path.join(exp_id, "images")
     os.makedirs(img_folder, exist_ok=True)
     result_folder = os.path.join(exp_id, "results")
@@ -140,6 +138,7 @@ def main(args):
             args.epochs = epoch + 1
     else:
         epoch = 0
+
     if args.freeze_batchnorm:
         freeze.freeze_batchnorm_stats(model)  # Freeze batchnorm
 
@@ -159,13 +158,18 @@ def main(args):
     save_results["opt"] = dict(vars(args))
     save_results["train_losses"] = []
     save_results["val_losses"] = []
+
+    monitor = MetricMonitor()
+    print("Will monitor metrics.")
+
     for epoch_idx in tqdm(range(epoch, args.epochs), desc="epoch"):
         if not args.freeze_batchnorm:
             model.train()
         else:
             model.eval()
+
         if not args.evaluate:
-            save_dict, avg_meters, _ = epochpass.epoch_pass(
+            save_dict = epochpass.epoch_pass(
                 loader,
                 model,
                 train=True,
@@ -177,10 +181,8 @@ def main(args):
                 display_freq=args.display_freq,
                 epoch_display_freq=args.epoch_display_freq,
                 lr_decay_gamma=args.lr_decay_gamma,
+                monitor=monitor,
             )
-            monitor.log_train(epoch_idx + 1, {key: val.avg for key, val in avg_meters.average_meters.items()})
-            monitor.metrics.save_metrics(epoch_idx + 1, save_dict)
-            monitor.metrics.plot_metrics()
             save_results["train_losses"].append(save_dict)
             with open(result_path, "wb") as p_f:
                 pickle.dump(save_results, p_f)
@@ -196,8 +198,9 @@ def main(args):
                 checkpoint=exp_id,
                 snapshot=args.snapshot,
             )
+
         if args.evaluate or (args.eval_freq != -1 and epoch_idx % args.eval_freq == 0):
-            val_save_dict, val_avg_meters, _ = epochpass.epoch_pass(
+            val_save_dict = epochpass.epoch_pass(
                 val_loader,
                 model,
                 train=False,
@@ -209,14 +212,16 @@ def main(args):
                 display_freq=args.display_freq,
                 epoch_display_freq=args.epoch_display_freq,
                 lr_decay_gamma=args.lr_decay_gamma,
+                monitor=monitor,
             )
 
             save_results["val_losses"].append(val_save_dict)
-            monitor.log_val(
-                epoch_idx + 1, {key: val.avg for key, val in val_avg_meters.average_meters.items()}
-            )
-            monitor.metrics.save_metrics(epoch_idx + 1, val_save_dict)
-            monitor.metrics.plot_metrics()
+            monitor.plot(os.path.join(exp_id, "training.html"), plotly=True)
+            monitor.plot_histogram(os.path.join(exp_id, "evaluation.html"), plotly=True)
+            if args.matplotlib:
+                monitor.plot(result_folder, matplotlib=True)
+                monitor.plot_histogram(result_folder, matplotlib=True)
+            monitor.save_metrics(os.path.join(exp_id, "metrics.pkl"))
             if args.evaluate:
                 print(val_save_dict)
                 break
@@ -230,15 +235,15 @@ if __name__ == "__main__":
     # Dataset params
     parser.add_argument(
         "--train_datasets",
-        choices=["syntho3d", "syntho3dv2", "ho3dv2", "fhbhands"],
-        default=["fhbhands"],
+        choices=["syn_colibri_v1", "real_colibri_v1"],
+        default=["syn_colibri_v1"],
         nargs="+",
     )
     parser.add_argument(
-        "--val_dataset", choices=["ho3dv2", "fhbhands"], default="fhbhands",
+        "--val_dataset", choices=["syn_colibri_v1", "real_colibri_v1"], default="syn_colibri_v1",
     )
     parser.add_argument("--train_splits", default=["train"], nargs="+")
-    parser.add_argument("--val_split", default="test", choices=["test", "train", "val", "trainval"])
+    parser.add_argument("--val_split", default="test", choices=["test", "train", "val"])
     parser.add_argument(
         "--split_mode",
         default="objects",
@@ -276,7 +281,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--workers", type=int, default=0, help="Number of workers for multiprocessing")
     parser.add_argument("--pyapt_id")
-    parser.add_argument("--epochs", type=int, default=10000)
+    parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--lr_decay_step", type=float, default=100)
     parser.add_argument(
         "--lr_decay_gamma",
@@ -343,14 +348,15 @@ if __name__ == "__main__":
 
     # Weighting params
     parser.add_argument(
-        "--display_freq", type=int, default=500, help="How often to generate visualizations (training steps)"
+        "--display_freq", type=int, default=1000, help="How often to generate visualizations (training steps)"
     )
     parser.add_argument(
         "--epoch_display_freq", type=int, default=1, help="How often to generate visualizations (epochs)"
     )
     parser.add_argument(
-        "--snapshot", type=int, default=100, help="How often to save intermediate models (epochs)"
+        "--snapshot", type=int, default=10, help="How often to save intermediate models (epochs)"
     )
+    parser.add_argument("--matplotlib", action="store_true")
 
     args = parser.parse_args()
     args.train_datasets = tuple(args.train_datasets)

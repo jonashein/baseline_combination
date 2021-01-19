@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from manopth import rodrigues_layer
@@ -54,10 +55,11 @@ class ObjBranch(nn.Module):
         objverts3d, center3d = project.recover_3d_proj(
             rotobjverts, camintr, final_scale, final_trans, input_res=(width, height)
         )
+        obj_pose = torch.cat([rotmat, center3d.transpose(1,2)], 2)
         # Recover 2D positions given camera intrinsic parameters and object vertex
         # coordinates in camera coordinate reference
         pred_objverts2d = camproject.batch_proj2d(objverts3d, camintr)
-        if BaseQueries.OBJCORNERS3D in sample:
+        if BaseQueries.OBJCANCORNERS in sample:
             canobjcorners = sample[BaseQueries.OBJCANCORNERS].cuda()
             rotobjcorners = rotmat.bmm(canobjcorners.float().transpose(1, 2)).transpose(1, 2)
             recov_objcorners3d = rotobjcorners + center3d
@@ -78,4 +80,5 @@ class ObjBranch(nn.Module):
             "obj_pretrans": trans,
             "obj_corners2d": pred_objcorners2d,
             "obj_corners3d": rotobjcorners,
+            "obj_pose": obj_pose,
         }

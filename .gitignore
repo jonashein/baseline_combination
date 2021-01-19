@@ -19,7 +19,3 @@ tmp*
 *.sw*
 *.png
 *.pdf
-
-jsonres/
-pred.json
-pred.zip

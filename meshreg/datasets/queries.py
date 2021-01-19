@@ -15,6 +15,7 @@ class BaseQueries(Enum):
     JOINTS3D = auto()
     JOINTS2D = auto()
     IMAGE = auto()
+    OBJMASK = auto()
     SIDE = auto()
     OBJCANVERTS = auto()
     OBJCANROTVERTS = auto()
@@ -23,6 +24,10 @@ class BaseQueries(Enum):
     OBJCANTRANS = auto()
     OBJCANCORNERS = auto()
     JOINTVIS = auto()
+    OBJPOSE = auto()
+    OBJFPS3D = auto()
+    OBJFPS2D = auto()
+    OBJFPSVECFIELD = auto()
 
 
 class TransQueries(Enum):
@@ -31,6 +36,8 @@ class TransQueries(Enum):
     OBJVERTS2D = auto()
     OBJCORNERS2D = auto()
     OBJCORNERS3D = auto()
+    OBJFPS3D = auto()
+    OBJFPS2D = auto()
     OBJCANROTVERTS = auto()
     OBJCANROTCORNERS = auto()
     HANDVERTS3D = auto()
@@ -39,6 +46,7 @@ class TransQueries(Enum):
     JOINTS2D = auto()
     CENTER3D = auto()
     IMAGE = auto()
+    #OBJMASK = auto()
     JITTERMASK = auto()
     SIDE = auto()
     SCALE = auto()
@@ -75,6 +83,8 @@ def get_trans_queries(base_queries):
         trans_queries.append(TransQueries.OBJVERTS3D)
     if BaseQueries.OBJVERTS2D in base_queries:
         trans_queries.append(TransQueries.OBJVERTS2D)
+    if BaseQueries.OBJFPS3D in base_queries:
+        trans_queries.append(TransQueries.OBJFPS3D)
     if BaseQueries.OBJCORNERS3D in base_queries:
         trans_queries.append(TransQueries.OBJCORNERS3D)
     if BaseQueries.OBJCORNERS2D in base_queries:
@@ -88,4 +98,6 @@ def get_trans_queries(base_queries):
     if BaseQueries.OBJCANVERTS in base_queries or BaseQueries.OBJCANCORNERS:
         trans_queries.append(BaseQueries.OBJCANSCALE)
         trans_queries.append(BaseQueries.OBJCANTRANS)
+    #if BaseQueries.OBJMASK in base_queries:
+    #    trans_queries.append(TransQueries.OBJMASK)
     return trans_queries
