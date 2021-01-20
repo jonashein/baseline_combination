@@ -6,10 +6,9 @@
 ## Table of Content
 
 - [Setup](#setup)
-  - [Download and install code](#download-and-install-code)
-  - [Download datasets](#download-datasets)
 - [Demo](#demo)
 - [Training](#training)
+- [Evaluation](#evaluation)
 - [Citations](#citations)
 
 ## Setup
