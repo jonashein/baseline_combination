@@ -1,7 +1,12 @@
 # Towards Markerless Surgical Tool and Hand Pose Estimation: HandObjectNet Baseline
 
-- [Project page](http://medicalaugmentedreality.org/handobject.html) 
-<!-- - [Paper](http://arxiv.org/abs/2004.13449) -->
+- [Project page](http://medicalaugmentedreality.org/handobject.html) <!-- - [Paper](http://arxiv.org/abs/2004.13449) -->
+- [Synthetic Grasp Generation](https://github.com/jonashein/grasp_generator)
+- [Synthetic Grasp Rendering](https://github.com/jonashein/grasp_renderer)
+- [Real Dataset Recording](https://github.com/jonashein/handobject_dataset_recorder)
+- [HandObjectNet Baseline](https://github.com/jonashein/handobjectnet_baseline)
+- [PVNet Baseline](https://github.com/jonashein/pvnet_baseline)
+- [Combined Model Baseline](https://github.com/jonashein/baseline_combination)
 
 ## Table of Content
 
@@ -61,7 +66,7 @@ cd ../
 ## Demo
 We provide pretrained models for our synthetic and real datasets, which can be downloaded [here](https://drive.google.com/file/d/1W71jGBdlrTUP8Ga3a8OzEYvhEjXiz7TH/view?usp=sharing).
 
-Download the checkpoints and copy the `handobjectnet_*` files to `handobjectnet_baseline/checkpoints/`:
+Download the checkpoints and copy the `handobjectnet_*` directories to `handobjectnet_baseline/checkpoints/`:
 ```sh
 cd checkpoints
 wget https://drive.google.com/file/d/1W71jGBdlrTUP8Ga3a8OzEYvhEjXiz7TH/view?usp=sharing
