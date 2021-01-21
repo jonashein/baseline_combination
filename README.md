@@ -1,4 +1,4 @@
-# Towards Markerless Surgical Tool and Hand Pose Estimation: HandObjectNet Baseline
+# Towards Markerless Surgical Tool and Hand Pose Estimation: Combined Model Baseline
 
 - [Project page](http://medicalaugmentedreality.org/handobject.html) <!-- - [Paper](http://arxiv.org/abs/2004.13449) -->
 - [Synthetic Grasp Generation](https://github.com/jonashein/grasp_generator)
@@ -22,8 +22,8 @@
 
 Retrieve the code
 ```sh
-git clone https://github.com/jonashein/handobjectnet_baseline
-cd handobjectnet_baseline
+git clone https://github.com/jonashein/baseline_combination
+cd baseline_combination
 ```
 
 Create and activate the virtual environment with python dependencies
@@ -42,7 +42,7 @@ conda activate handobject_env
 - Your structure should look like this:
 
 ```
-handobjectnet_baseline/
+baseline_combination/
   assets/
     mano/
       MANO_LEFT.pkl
@@ -64,24 +64,24 @@ cd ../
 ```
 
 ## Demo
-We provide pretrained models for our synthetic and real datasets, which can be downloaded [here](https://drive.google.com/file/d/1W71jGBdlrTUP8Ga3a8OzEYvhEjXiz7TH/view?usp=sharing).
+We provide pretrained models for our synthetic and real datasets, which can be downloaded [here](https://drive.google.com/file/d/1F1SoxS7zoXxCgUvwirp01voIK4x-7ocZ/view?usp=sharing).
 
-Download the checkpoints and copy the `handobjectnet_*` directories to `handobjectnet_baseline/checkpoints/`:
+Download the checkpoints and copy the `combinedModel_*` directories to `baseline_combination/checkpoints/`:
 ```sh
 cd checkpoints
-wget https://drive.google.com/file/d/1W71jGBdlrTUP8Ga3a8OzEYvhEjXiz7TH/view?usp=sharing
-unzip handobjectnet.zip
+wget https://drive.google.com/file/d/1F1SoxS7zoXxCgUvwirp01voIK4x-7ocZ/view?usp=sharing
+unzip combinedModel.zip
 cd ../
 ```
 
 To evaluate the pretrained model on the synthetic test set, run:
 ```sh
-python3 trainmeshreg.py --block_rot --train_dataset real_colibri_v1 --val_dataset real_colibri_v1 --val_split test --evaluate --display_freq 1 --resume checkpoints/handobjectnet_pretrained_cv0/model_best.pth
+python3 trainmeshreg.py --block_rot --train_dataset real_colibri_v1 --val_dataset real_colibri_v1 --val_split test --evaluate --display_freq 1 --resume checkpoints/combinedModel_pretrained_cv0/model_best.pth
 ```
 
 To evaluate the refined model on the real test set, run:
 ```sh
-python3 trainmeshreg.py --block_rot --train_dataset real_colibri_v1 --val_dataset real_colibri_v1 --val_split test --evaluate --display_freq 1 --resume checkpoints/handobjectnet_refined_cv0/model_best.pth
+python3 trainmeshreg.py --block_rot --train_dataset real_colibri_v1 --val_dataset real_colibri_v1 --val_split test --evaluate --display_freq 1 --resume checkpoints/combinedModel_refined_cv0/model_best.pth
 ```
 The training and evaluation will be stored with a timestamp at `checkpoints/DATASETNAME_train_mini1/YYYY_MM_DD_HH_mm/`.
 
