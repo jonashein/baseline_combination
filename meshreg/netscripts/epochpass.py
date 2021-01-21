@@ -4,11 +4,7 @@ import pickle
 from tqdm import tqdm
 import torch
 
-from libyana.evalutils.avgmeter import AverageMeters
-from libyana.evalutils.zimeval import EvalUtil
-
-from meshreg.datasets.queries import BaseQueries
-from meshreg.visualize import samplevis
+from meshreg.visualize import samplevis, evalvis
 from meshreg.visualize import consistdisplay
 from meshreg.netscripts.monitor import MetricMonitor
 from meshreg.netscripts.metrics import evaluate
@@ -28,6 +24,7 @@ def epoch_pass(
     lr_decay_gamma=0,
     freeze_batchnorm=True,
     monitor=None,
+    save_inference=False,
 ):
     if train:
         prefix = "train"
@@ -38,6 +35,7 @@ def epoch_pass(
         model.eval()
 
     render_step = 0
+    inference_results = []
 
     # Loop over dataset
     for batch_idx, batch in enumerate(tqdm(loader, desc="batch")):
@@ -56,6 +54,8 @@ def epoch_pass(
         else:
             with torch.no_grad():
                 loss, results, losses = model(batch)
+                if save_inference:
+                    inference_results.append(results)
 
         # Update metrics
         if monitor is not None:
@@ -76,6 +76,10 @@ def epoch_pass(
             img_filepath = f"{prefix}_epoch{epoch:04d}_batch{batch_idx:06d}.png"
             save_img_path = os.path.join(img_folder, img_filepath)
             samplevis.sample_vis(batch, results, fig=fig, save_img_path=save_img_path)
+
+    if save_inference:
+        with open("inference.pkl", "wb") as f:
+            pickle.dump(inference_results, f)
 
     if lr_decay_gamma and scheduler is not None:
         scheduler.step()

@@ -1,5 +1,6 @@
 import pickle
 import torch
+import numpy as np
 from torch import nn
 import torch.nn.functional as torch_f
 
@@ -9,10 +10,10 @@ from libyana.modelutils.freeze import rec_freeze
 from meshreg.models import resnet
 from meshreg.models.absolutebranch import AbsoluteBranch
 from meshreg.models.manobranch import ManoBranch, ManoLoss
-from meshreg.models.objbranch import ObjBranch
+from meshreg.models.pvnetbranch import PVNetDecoder
 from meshreg.models import project
 from meshreg.datasets.queries import TransQueries, BaseQueries, one_query_in
-
+from .pvnetutils import batched_pnp, transform
 
 def normalize_pixel_out(data, inp_res=256):
     centered = data - inp_res
@@ -79,6 +80,8 @@ class MeshRegNet(nn.Module):
         obj_trans_factor=1,
         obj_scale_factor=1,
         inp_res=256,
+        uncertainty_pnp=True,
+        domain_norm=False,
     ):
         """
         Args:
@@ -100,12 +103,16 @@ class MeshRegNet(nn.Module):
         """
         super().__init__()
         self.inp_res = inp_res
+        self.uncertainty_pnp = uncertainty_pnp
+        self.domain_norm = domain_norm
+        self.compute_pnp = False
+
         if int(resnet_version) == 18:
             img_feature_size = 512
-            base_net = resnet.resnet18(pretrained=True)
+            base_net = resnet.resnet18(pretrained=True, return_cuda_inter=True, domain_norm=self.domain_norm)
         elif int(resnet_version) == 50:
             img_feature_size = 2048
-            base_net = resnet.resnet50(pretrained=True)
+            base_net = resnet.resnet50(pretrained=True, return_cuda_inter=True, domain_norm=self.domain_norm)
         else:
             raise NotImplementedError("Resnet {} not supported".format(resnet_version))
         self.criterion2d = criterion2d
@@ -116,15 +123,16 @@ class MeshRegNet(nn.Module):
         self.scaletrans_branch = AbsoluteBranch(
             base_neurons=[img_feature_size, int(img_feature_size / 2)], out_dim=3
         )
-        # Predict translation, scaling and rotation for object
-        self.scaletrans_branch_obj = AbsoluteBranch(
-            base_neurons=[img_feature_size, int(img_feature_size / 2)], out_dim=6
-        )
-
         # Initialize object branch
-        self.obj_branch = ObjBranch(trans_factor=obj_trans_factor, scale_factor=obj_scale_factor)
+        self.obj_branch = PVNetDecoder(ver_dim=18,
+                                       seg_dim=2,
+                                       uncertainty_pnp=uncertainty_pnp,
+                                       resnet_inplanes=base_net.inplanes,
+                                       domain_norm=self.domain_norm)
         self.obj_scale_factor = obj_scale_factor
         self.obj_trans_factor = obj_trans_factor
+        self.obj_vote_crit = nn.functional.smooth_l1_loss
+        self.obj_seg_crit = nn.functional.cross_entropy
 
         # Initialize mano branch
         self.mano_branch = ManoBranch(
@@ -168,6 +176,8 @@ class MeshRegNet(nn.Module):
             lambda_shape=mano_lambda_shape,
             lambda_pose_reg=mano_lambda_pose_reg,
         )
+
+        # Store loss weights
         self.mano_lambda_joints2d = mano_lambda_joints2d
         self.mano_lambda_recov_joints3d = mano_lambda_recov_joints3d
         self.mano_lambda_recov_verts3d = mano_lambda_recov_verts3d
@@ -175,11 +185,14 @@ class MeshRegNet(nn.Module):
         self.obj_lambda_verts2d = obj_lambda_verts2d
         self.obj_lambda_verts3d = obj_lambda_verts3d
         self.obj_lambda_recov_verts3d = obj_lambda_recov_verts3d
+        self.obj_lambda_seg = 0.01
+        self.obj_lambda_vote = 0.1
+
 
     def recover_mano(
         self,
         sample,
-        features=None,
+        encoder_output=None,
         pose=None,
         shape=None,
         no_loss=False,
@@ -188,7 +201,7 @@ class MeshRegNet(nn.Module):
         trans=None,
     ):
         # Get hand projection, centered
-        mano_results = self.mano_branch(features, sides=sample[BaseQueries.SIDE], pose=pose, shape=shape)
+        mano_results = self.mano_branch(encoder_output, sides=sample[BaseQueries.SIDE], pose=pose, shape=shape)
         if self.adaptor:
             adapt_joints, _ = self.adaptor(mano_results["verts3d"])
             adapt_joints = adapt_joints.transpose(1, 2)
@@ -212,7 +225,7 @@ class MeshRegNet(nn.Module):
             or self.mano_lambda_recov_verts3d
         ):
             if scale is None and trans is None:
-                scaletrans = self.scaletrans_branch(features)
+                scaletrans = self.scaletrans_branch(encoder_output)
                 if trans is None:
                     trans = scaletrans[:, 1:]
                 if scale is None:
@@ -231,6 +244,7 @@ class MeshRegNet(nn.Module):
             mano_results["joints2d"] = proj_joints2d
             mano_results["recov_joints3d"] = recov_joints3d
             mano_results["recov_handverts3d"] = recov_hand_verts3d
+            mano_results["hand_center3d"] = center3d
             mano_results["verts2d"] = proj_verts2d
             mano_results["hand_pretrans"] = trans
             mano_results["hand_prescale"] = scale
@@ -271,63 +285,69 @@ class MeshRegNet(nn.Module):
                     total_loss += self.mano_lambda_recov_verts3d * recov_loss
         return mano_results, total_loss, mano_losses
 
-    def recover_object(self, sample, features=None, total_loss=None, scale=None, trans=None, rotaxisang=None):
+
+    def recover_object(self, sample, input, encoder_output, encoder_features, no_loss=False, total_loss=None, scale=None, trans=None, rotaxisang=None):
         """
         Compute object vertex and corner positions in camera coordinates by predicting object translation
         and scaling, and recovering 3D positions given known object model
         """
-        if features is None:
-            scaletrans_obj = None
-        else:
-            scaletrans_obj = self.scaletrans_branch_obj(features)
-        obj_results = self.obj_branch(sample, scaletrans_obj, scale=scale, trans=trans, rotaxisang=rotaxisang)
+        obj_results = self.obj_branch(input, encoder_output, encoder_features, compute_pnp=self.compute_pnp)
+
+        # Compute losses
         obj_losses = {}
-        if self.criterion2d == "l2" and TransQueries.OBJVERTS2D in sample:
-            obj2d_loss = torch_f.mse_loss(
-                normalize_pixel_out(obj_results["obj_verts2d"], self.inp_res),
-                normalize_pixel_out(sample[TransQueries.OBJVERTS2D].cuda(), self.inp_res),
-            )
-            obj_losses["objverts2d"] = obj2d_loss
-            total_loss += self.obj_lambda_verts2d * obj2d_loss
-        elif self.criterion2d == "l1" and TransQueries.OBJVERTS2D in sample:
-            obj2d_loss = torch_f.l1_loss(
-                normalize_pixel_out(obj_results["obj_verts2d"], self.inp_res),
-                normalize_pixel_out(sample[TransQueries.OBJVERTS2D].cuda(), self.inp_res),
-            )
-            obj_losses["objverts2d"] = obj2d_loss
-            total_loss += self.obj_lambda_verts2d * obj2d_loss
-        elif self.criterion2d == "smoothl1" and TransQueries.OBJVERTS2D in sample:
-            obj2d_loss = torch_f.smooth_l1_loss(
-                normalize_pixel_out(obj_results["obj_verts2d"], self.inp_res),
-                normalize_pixel_out(sample[TransQueries.OBJVERTS2D].cuda(), self.inp_res),
-            )
-            obj_losses["objverts2d"] = obj2d_loss
-            total_loss += self.obj_lambda_verts2d * obj2d_loss
-        if TransQueries.OBJCANROTVERTS in sample:
-            obj3d_loss = torch_f.smooth_l1_loss(
-                obj_results["obj_verts3d"], sample[TransQueries.OBJCANROTVERTS].float().cuda()
-            )
-            obj_losses["objverts3d"] = obj3d_loss
-            total_loss += self.obj_lambda_verts3d * obj3d_loss
+        if not no_loss:
+            if BaseQueries.OBJFPSVECFIELD in sample and BaseQueries.OBJMASK in sample:
+                weight = sample[BaseQueries.OBJMASK][:, None].float().cuda()
+                vec_field = sample[BaseQueries.OBJFPSVECFIELD].cuda()
+                vote_loss = self.obj_vote_crit(obj_results['vertex'] * weight, vec_field * weight, reduction='sum')
+                vote_loss = vote_loss / weight.sum() / vec_field.size(1)
+                obj_losses.update({'obj_vote_loss': vote_loss})
+                if total_loss is None:
+                    total_loss = self.obj_lambda_vote * vote_loss
+                else:
+                    total_loss += self.obj_lambda_vote * vote_loss
+            if BaseQueries.OBJMASK in sample:
+                mask = sample[BaseQueries.OBJMASK].long().cuda()
+                seg_loss = self.obj_seg_crit(obj_results['seg'], mask)
+                obj_losses.update({'obj_seg_loss': seg_loss})
+                if total_loss is None:
+                    total_loss = self.obj_lambda_seg * seg_loss
+                else:
+                    total_loss += self.obj_lambda_seg * seg_loss
 
-        if self.obj_lambda_recov_verts3d is not None and BaseQueries.OBJVERTS3D in sample:
-            objverts3d_gt = sample[BaseQueries.OBJVERTS3D].cuda()
-            recov_verts3d = obj_results["recov_objverts3d"]
+        # Compute obj pose via RANSAC and PnP
+        if self.compute_pnp:
+            if BaseQueries.OBJFPS3D in sample and BaseQueries.OBJCORNERS3D in sample and BaseQueries.CAMINTR in sample and BaseQueries.OBJCANVERTS in sample:
+                kpt_3d = sample[BaseQueries.OBJFPS3D].cpu().numpy()
+                cam_intr = sample[BaseQueries.CAMINTR]
+                verts = sample[BaseQueries.OBJCANVERTS]
+                pred_kpt_2d = obj_results['kpt_2d'].cpu().numpy()
 
-            obj_recov_loss = torch_f.mse_loss(recov_verts3d, objverts3d_gt)
-            if total_loss is None:
-                total_loss = self.obj_lambda_recov_verts3d * obj_recov_loss
-            else:
-                total_loss += self.obj_lambda_recov_verts3d * obj_recov_loss
-            obj_losses["recov_objverts3d"] = obj_recov_loss
+                var = None
+                if self.uncertainty_pnp:
+                    var = obj_results['var'].detach().cpu().numpy()
+                poses = batched_pnp(kpt_3d, pred_kpt_2d, cam_intr.cpu().numpy(), var=var)
+                poses = torch.Tensor(poses).cuda()
+                obj_results['obj_pose'] = poses
+
+                verts_3d_hom = torch.cat([verts, torch.ones(verts.shape[:-1] + (1,))], axis=2)
+                pred_verts3d = poses.bmm(verts_3d_hom.transpose(1, 2).cuda())
+                obj_results['recov_objverts3d'] = pred_verts3d.transpose(1, 2)
+                pred_verts2d = cam_intr.cuda().bmm(pred_verts3d)
+                pred_verts2d = pred_verts2d[:, :2] / pred_verts2d[:, 2:]
+                obj_results['obj_verts2d'] = pred_verts2d.transpose(1, 2)
+
         return obj_results, total_loss, obj_losses
+
 
     def forward(self, sample, no_loss=False, step=0, preparams=None):
         total_loss = torch.Tensor([0]).cuda()
         results = {}
         losses = {}
+        # Get input
         image = sample[TransQueries.IMAGE].cuda()
-        features, _ = self.base_net(image)
+        # Feed input into shared encoder
+        encoder_output, encoder_features = self.base_net(image)
         has_mano_super = one_query_in(
             sample.keys(),
             [
@@ -348,9 +368,10 @@ class MeshRegNet(nn.Module):
                 hand_pose = None
                 hand_shape = None
                 hand_trans = None
+            # Hand branch
             mano_results, total_loss, mano_losses = self.recover_mano(
                 sample,
-                features=features,
+                encoder_output=encoder_output,
                 no_loss=no_loss,
                 total_loss=total_loss,
                 trans=hand_trans,
@@ -371,8 +392,9 @@ class MeshRegNet(nn.Module):
                 obj_scale = None
                 obj_rot = None
                 obj_trans = None
+            # Object branch
             obj_results, total_loss, obj_losses = self.recover_object(
-                sample, features, total_loss=total_loss, scale=obj_scale, trans=obj_trans, rotaxisang=obj_rot
+                sample, image, encoder_output, encoder_features, no_loss=no_loss, total_loss=total_loss, scale=obj_scale, trans=obj_trans, rotaxisang=obj_rot
             )
             losses.update(obj_losses)
             results.update(obj_results)

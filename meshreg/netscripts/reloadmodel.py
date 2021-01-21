@@ -45,6 +45,8 @@ def reload_model(resume_checkpoint, opts, optimizer=None, mano_lambda_pose_reg=N
         obj_trans_factor=opts["obj_trans_factor"],
         obj_scale_factor=opts["obj_scale_factor"],
         mano_fhb_hand="fhbhands" in opts["train_datasets"],
+        uncertainty_pnp=True,
+        domain_norm=opts["domain_norm"] if "domain_norm" in opts else False,
     )
     # model = torch.nn.DataParallel(model)
     if resume_checkpoint:

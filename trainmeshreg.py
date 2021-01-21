@@ -127,6 +127,8 @@ def main(args):
         obj_trans_factor=args.obj_trans_factor,
         obj_scale_factor=args.obj_scale_factor,
         mano_fhb_hand="fhbhands" in args.train_datasets,
+        uncertainty_pnp=True,
+        domain_norm=args.domain_norm,
     )
     model.cuda()
     # Initalize model
@@ -194,7 +196,7 @@ def main(args):
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler,
                 },
-                is_best=True,
+                is_best=False,
                 checkpoint=exp_id,
                 snapshot=args.snapshot,
             )
@@ -213,8 +215,21 @@ def main(args):
                 epoch_display_freq=args.epoch_display_freq,
                 lr_decay_gamma=args.lr_decay_gamma,
                 monitor=monitor,
+                save_inference=args.save_inference,
             )
-
+            monitor.save_metrics(os.path.join(exp_id, "metrics.pkl"))
+            modelio.save_checkpoint(
+                {
+                    "epoch": epoch_idx + 1,
+                    "network": "correspnet",
+                    "state_dict": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler,
+                },
+                is_best=False,
+                checkpoint=exp_id,
+                snapshot=args.snapshot,
+            )
             save_results["val_losses"].append(val_save_dict)
             monitor.plot(os.path.join(exp_id, "training.html"), plotly=True)
             monitor.plot_histogram(os.path.join(exp_id, "evaluation.html"), plotly=True)
@@ -357,6 +372,8 @@ if __name__ == "__main__":
         "--snapshot", type=int, default=10, help="How often to save intermediate models (epochs)"
     )
     parser.add_argument("--matplotlib", action="store_true")
+    parser.add_argument("--save_inference", action="store_true")
+    parser.add_argument("--domain_norm", action="store_true")
 
     args = parser.parse_args()
     args.train_datasets = tuple(args.train_datasets)

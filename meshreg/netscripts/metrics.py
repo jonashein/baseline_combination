@@ -200,8 +200,6 @@ def obj_pose_3d(batch, pred):
         trace = np.where(is_symmetric, -1.0, trace)
         # Overwrite trace=3.0 if we're at the singularity at 0°
         trace = np.where(is_identity, 3.0, trace)
-        #trace = np.where(np.logical_and(trace > 3.0, trace < 3.1), 3.0, trace)
-        #trace = np.where(np.logical_and(trace > -1.1, trace < -1.0), -1.0, trace)
         obj_rotation_3d = np.rad2deg(np.arccos((trace - 1.) / 2.))
         result["obj_rotation_3d"] = obj_rotation_3d
 
@@ -225,21 +223,6 @@ def obj_drilltip_3d(batch, pred):
         pose_targets = batch[BaseQueries.OBJPOSE]
         if isinstance(pose_targets, torch.Tensor):
             pose_targets = pose_targets.numpy()
-
-        # Apply object vertex normalization onto target pose (pose_pred is the pose for the normalized object)
-        normalization = np.tile(np.eye(4), (pose_targets.shape[0], 1, 1))
-        if BaseQueries.OBJCANTRANS in batch and batch[BaseQueries.OBJCANTRANS] is not None:
-            objcantrans = batch[BaseQueries.OBJCANTRANS]
-            if isinstance(objcantrans, torch.Tensor):
-                objcantrans = objcantrans.detach().cpu().numpy()
-            normalization[:, :3, 3] = objcantrans
-        if BaseQueries.OBJCANSCALE in batch and batch[BaseQueries.OBJCANSCALE] is not None:
-            objcanscale = batch[BaseQueries.OBJCANSCALE]
-            if isinstance(objcanscale, torch.Tensor):
-                objcanscale = objcanscale.detach().cpu().numpy()
-            objcanscale = objcanscale.reshape((-1, 1, 1))
-            normalization = np.multiply(normalization, np.tile(objcanscale, (1, 4, 4)))
-        pose_targets = np.matmul(pose_targets, normalization)
 
         # Compute drill bit position, orientation
         # THIS IS ONLY VALID FOR OUR EXACT DRILL MODEL!

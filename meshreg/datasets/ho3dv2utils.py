@@ -1,6 +1,4 @@
 from collections import defaultdict
-import subprocess
-import shutil
 import json
 import os
 import pickle
@@ -125,7 +123,7 @@ def get_objectsplit_infos(seqs, root, subfolder="train", fraction=1):
     return all_sequences, seq_map, closeseq_map, strongs, weaks, idxs
 
 
-def dump(pred_out_path, xyz_pred_list, verts_pred_list, codalab=True):
+def dump(pred_out_path, xyz_pred_list, verts_pred_list):
     """ Save predictions into a json file for official ho3dv2 evaluation. """
     # make sure its only lists
     def roundall(rows):
@@ -141,6 +139,3 @@ def dump(pred_out_path, xyz_pred_list, verts_pred_list, codalab=True):
         "Dumped %d joints and %d verts predictions to %s"
         % (len(xyz_pred_list), len(verts_pred_list), pred_out_path)
     )
-    if codalab:
-        shutil.copy(pred_out_path, "pred.json")
-        subprocess.call(["zip", "-j", "pred.zip", "pred.json"])

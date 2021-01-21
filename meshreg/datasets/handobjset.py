@@ -124,9 +124,25 @@ class HandObjSet(Dataset):
             if BaseQueries.IMAGE in query:
                 sample[BaseQueries.IMAGE] = np.array(img)
 
+        # Get object mask
+        if BaseQueries.OBJMASK in query:
+            mask = self.pose_dataset.get_obj_mask(idx)
+            if flip:
+                mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+            if BaseQueries.OBJMASK in query:
+                sample[BaseQueries.OBJMASK] = mask
+
+        # Get keypoint vector fields
+        if BaseQueries.OBJFPSVECFIELD in query:
+            vec_field = self.pose_dataset.get_obj_fpsvectorfield(idx)
+            if flip:
+                vec_field = np.fliplr(vec_field)
+            sample[BaseQueries.OBJFPSVECFIELD] = vec_field
+
         # Flip and image 2d if needed
         if flip:
             center[0] = img.size[0] - center[0]
+
         # Data augmentation
         if space_augm is not None:
             center = space_augm["center"]
@@ -139,18 +155,18 @@ class HandObjSet(Dataset):
             center_jit = Uniform(low=-1, high=1).sample((2,)).numpy()
             center_offsets = self.center_jittering * scale * center_jit
             center = center + center_offsets.astype(int)
-
             # Scale jittering
             scale_jit = Normal(0, 1).sample().item() + 1
             scale_jittering = self.scale_jittering * scale_jit
             scale_jittering = np.clip(scale_jittering, 1 - self.scale_jittering, 1 + self.scale_jittering)
             scale = scale * scale_jittering
-
             rot = Uniform(low=-self.max_rot, high=self.max_rot).sample().item()
         else:
             rot = 0
+
         if self.block_rot:
             rot = 0
+
         space_augm = {"rot": rot, "scale": scale, "center": center}
         sample["space_augm"] = space_augm
         rot_mat = np.array([[np.cos(rot), -np.sin(rot), 0], [np.sin(rot), np.cos(rot), 0], [0, 0, 1]]).astype(
@@ -162,6 +178,7 @@ class HandObjSet(Dataset):
             affinetrans, post_rot_trans = handutils.get_affine_transform(center, scale, self.inp_res, rot=rot)
             if TransQueries.AFFINETRANS in query:
                 sample[TransQueries.AFFINETRANS] = affinetrans
+
         if BaseQueries.JOINTS2D in query or TransQueries.JOINTS2D in query:
             joints2d = self.pose_dataset.get_joints2d(idx)
             if flip:
@@ -248,7 +265,7 @@ class HandObjSet(Dataset):
                         center3d = (joints3d[9] + joints3d[0]) / 2
                     else:
                         center3d = joints3d[self.center_idx]
-                if TransQueries.JOINTS3D in query and (BaseQueries.JOINTS3D in query and self.center_idx is not None):
+                if TransQueries.JOINTS3D in query and (self.center_idx is not None):
                     joints3d = joints3d - center3d
                 if TransQueries.JOINTS3D in query:
                     sample[TransQueries.JOINTS3D] = joints3d.astype(np.float32)
@@ -295,7 +312,7 @@ class HandObjSet(Dataset):
                 can_rot_mesh = rot_mat.dot(obj_canverts3d.transpose(1, 0)).transpose()
                 sample[TransQueries.OBJCANROTVERTS] = can_rot_mesh
 
-        # Get 3D obj vertices
+        # Get 3D obj corners
         if TransQueries.OBJCANROTCORNERS in query or BaseQueries.OBJCANROTCORNERS in query:
             obj_cancorners3d = self.pose_dataset.get_obj_corners_can_rot(idx)
             if flip:
@@ -311,14 +328,14 @@ class HandObjSet(Dataset):
             sample[BaseQueries.OBJFACES] = obj_faces
 
         if BaseQueries.OBJCANVERTS in query:
-            obj_canverts, obj_cantrans, obj_canscale = self.pose_dataset.get_obj_verts_can(idx)
+            obj_canverts, obj_cantrans, obj_canscale = self.pose_dataset.get_obj_verts_can(idx, no_center=True)
             if flip:
                 obj_canverts[:, 0] = -obj_canverts[:, 0]
             sample[BaseQueries.OBJCANVERTS] = obj_canverts
-            if obj_canscale is not None:
-                sample[BaseQueries.OBJCANSCALE] = obj_canscale
             if obj_cantrans is not None:
                 sample[BaseQueries.OBJCANTRANS] = obj_cantrans
+            if obj_canscale is not None:
+                sample[BaseQueries.OBJCANSCALE] = obj_canscale
 
         # Get 3D obj corners
         if BaseQueries.OBJCORNERS3D in query or TransQueries.OBJCORNERS3D in query:
@@ -339,7 +356,7 @@ class HandObjSet(Dataset):
             obj_cancorners = self.pose_dataset.get_obj_corners_can(idx)
             sample[BaseQueries.OBJCANCORNERS] = obj_cancorners
 
-        if BaseQueries.JOINTS3D in query and TransQueries.CENTER3D in query:
+        if TransQueries.CENTER3D in query:
             sample[TransQueries.CENTER3D] = center3d
 
         # Get rgb image
@@ -386,6 +403,21 @@ class HandObjSet(Dataset):
                 jittermask = jittermask.crop((0, 0, self.inp_res[0], self.inp_res[1]))
                 jittermask = func_transforms.to_tensor(jittermask).float()
                 sample[TransQueries.JITTERMASK] = jittermask
+
+        # Get 3D obj keypoints
+        if BaseQueries.OBJFPS3D in query:
+            obj_fps3d = self.pose_dataset.get_obj_fps3d(idx)
+            if flip:
+                obj_fps3d[:, 0] = -obj_fps3d[:, 0]
+            sample[BaseQueries.OBJFPS3D] = obj_fps3d
+
+        # Get 2D obj keypoints
+        if BaseQueries.OBJFPS2D in query:
+            obj_fps2d = self.pose_dataset.get_obj_fps2d(idx)
+            if flip:
+                obj_fps2d = obj_fps2d.copy()
+                obj_fps2d[:, 0] = img.size[0] - obj_fps2d[:, 0]
+            sample[BaseQueries.OBJFPS2D] = obj_fps2d
 
         if self.pose_dataset.has_dist2strong and self.has_dist2strong:
             dist2strong = self.pose_dataset.get_dist2strong(idx)
